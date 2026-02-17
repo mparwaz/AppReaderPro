@@ -1,0 +1,389 @@
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AppReader Pro | Cloud SQLite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+        
+        body { font-family: 'Inter', sans-serif; overflow: hidden; }
+        .glass-panel { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
+        .data-table tr:nth-child(even) { background-color: rgba(248, 250, 252, 0.8); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade { animation: fadeIn 0.4s ease-out forwards; }
+        
+        .url-chip { 
+            display: inline-flex; 
+            align-items: center; 
+            gap: 6px; 
+            padding: 4px 12px; 
+            border-radius: 99px; 
+            background: #dbeafe; 
+            color: #1e40af; 
+            font-weight: 600; 
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .url-chip:hover { background: #1e40af; color: white; transform: scale(1.05); }
+
+        #videoModal { background: rgba(0, 0, 0, 0.9); backdrop-filter: blur(20px); }
+    </style>
+</head>
+<body class="bg-[#f1f5f9] text-slate-900 min-h-screen flex flex-col">
+
+    <!-- Video Player Modal -->
+    <div id="videoModal" class="fixed inset-0 z-[200] hidden flex flex-col items-center justify-center p-4 md:p-10 animate-fade">
+        <div class="absolute top-6 right-6 z-[210]">
+            <button onclick="closeVideo()" class="p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-all">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        <div class="w-full max-w-5xl aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl relative">
+            <!-- Enhanced iframe with necessary permissions for Google/YouTube players -->
+            <iframe id="videoFrame" class="w-full h-full border-0" 
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture" 
+                sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+                allowfullscreen></iframe>
+            <video id="htmlVideoPlayer" class="hidden w-full h-full" controls></video>
+        </div>
+        <div class="mt-6 text-center">
+            <h2 id="videoTitle" class="text-white text-xl font-bold">Movie Player</h2>
+            <p class="text-slate-400 text-sm mt-1">Press ESC to close</p>
+        </div>
+    </div>
+
+    <!-- Auth/Setup Overlay -->
+    <div id="setupOverlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 transition-all duration-500">
+        <div class="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-fade">
+            <div class="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-blue-200">
+                <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+            </div>
+            <h1 class="text-2xl font-extrabold mb-2 tracking-tight">Connect Your Data</h1>
+            <p class="text-slate-500 text-sm mb-8">Enter your Gist details or use manual load if GitHub is restricted.</p>
+            
+            <div class="space-y-5">
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 tracking-widest">Gist Identifier</label>
+                    <input type="text" id="gistId" class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="Paste Gist ID here">
+                </div>
+                
+                <button onclick="initializeApp()" id="connectBtn" class="w-full bg-slate-900 hover:bg-black text-white font-bold py-4 rounded-xl transition-all shadow-xl active:scale-[0.98]">
+                    Launch Application
+                </button>
+
+                <div id="manualOption" class="hidden pt-4 border-t border-slate-100 animate-fade">
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 tracking-widest">Manual Data Fallback</label>
+                    <textarea id="manualBase64" class="w-full h-20 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] focus:ring-2 focus:ring-blue-500 outline-none resize-none" placeholder="Paste raw content from main.sqlite.b64 here if API fails..."></textarea>
+                    <button onclick="loadManual()" class="w-full mt-2 text-xs font-bold text-blue-600 hover:underline">Load Manual Data</button>
+                </div>
+            </div>
+            <div id="loginError" class="mt-4 p-3 bg-red-50 rounded-xl text-xs text-red-600 font-medium hidden"></div>
+        </div>
+    </div>
+
+    <!-- Main App Container -->
+    <div class="flex-1 flex overflow-hidden hidden" id="mainApp">
+        <aside class="w-72 glass-panel border-r border-slate-200 flex flex-col z-10">
+            <div class="p-6">
+                <div class="flex items-center gap-3 mb-8">
+                    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-xs">AR</div>
+                    <span class="font-extrabold text-xl tracking-tighter">AppReader<span class="text-blue-600">.</span></span>
+                </div>
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Database Tables</h3>
+                        <nav id="tableNav" class="space-y-1 custom-scrollbar max-h-[50vh] overflow-y-auto"></nav>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-auto p-6 border-t border-slate-100">
+                <button onclick="logout()" class="flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-red-500 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                    Disconnect
+                </button>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col overflow-hidden">
+            <header class="h-20 glass-panel border-b border-slate-200 flex items-center justify-between px-8 z-20">
+                <div class="flex items-center gap-4 flex-1 max-w-xl">
+                    <div class="relative w-full">
+                        <span class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                        </span>
+                        <input type="text" id="tableSearch" oninput="filterData()" placeholder="Search records..." class="w-full pl-12 pr-4 py-2.5 bg-slate-100/50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="flex flex-col items-end">
+                        <span id="syncStatus" class="text-[10px] font-bold text-green-500 uppercase flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Cloud Synced
+                        </span>
+                        <span id="lastUpdated" class="text-[9px] text-slate-400">Syncing...</span>
+                    </div>
+                    <button onclick="refreshData()" class="p-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm active:rotate-180 duration-500">
+                        <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    </button>
+                </div>
+            </header>
+
+            <div id="contentArea" class="flex-1 overflow-auto p-8">
+                <div id="emptyState" class="h-full flex flex-col items-center justify-center text-center">
+                    <div class="w-24 h-24 bg-slate-200 rounded-full flex items-center justify-center mb-6">
+                        <svg class="w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                    </div>
+                    <h2 class="text-xl font-bold text-slate-800">Ready</h2>
+                    <p class="text-slate-400 text-sm max-w-xs mt-2">Select a table to browse records.</p>
+                </div>
+
+                <div id="tableContainer" class="hidden animate-fade">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 id="activeTableName" class="text-2xl font-extrabold tracking-tight uppercase text-slate-800">Table Name</h2>
+                        <span id="recordCount" class="text-xs font-bold text-slate-400 bg-white border border-slate-200 px-3 py-1 rounded-full uppercase">0 Records</span>
+                    </div>
+                    <div class="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
+                        <div class="overflow-x-auto custom-scrollbar">
+                            <table id="dataTable" class="w-full text-left text-sm data-table"></table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let db = null;
+        let SQL = null;
+        let activeTable = null;
+        let currentData = [];
+        const STORAGE_KEY = 'appreader_gist_config';
+
+        window.onload = () => {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                const config = JSON.parse(saved);
+                document.getElementById('gistId').value = config.gistId || "";
+            }
+        }
+
+        document.addEventListener('keydown', (e) => { if (e.key === "Escape") closeVideo(); });
+
+        async function initializeApp() {
+            const gistIdInput = document.getElementById('gistId');
+            const gistId = gistIdInput.value.trim();
+            const fileName = "main.sqlite.b64";
+            const connectBtn = document.getElementById('connectBtn');
+            const errorDiv = document.getElementById('loginError');
+            
+            if (!gistId) { showError("Gist ID required."); return; }
+            
+            errorDiv.classList.add('hidden');
+            connectBtn.innerText = "Syncing with GitHub...";
+            connectBtn.disabled = true;
+
+            try {
+                const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+                    headers: { 'Accept': 'application/vnd.github.v3+json' }
+                });
+                
+                if (!res.ok) {
+                    if (res.status === 403) throw new Error("GitHub Rate Limit Exceeded. Use 'Manual Fallback'.");
+                    if (res.status === 404) throw new Error("Gist not found.");
+                    throw new Error(`GitHub API Error (${res.status})`);
+                }
+                
+                const gistData = await res.json();
+                if (!gistData.files[fileName]) throw new Error(`File '${fileName}' not found.`);
+                
+                processBase64(gistData.files[fileName].content, gistId);
+            } catch (err) {
+                showError(err.message);
+                document.getElementById('manualOption').classList.remove('hidden');
+                connectBtn.innerText = "Retry Connection";
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function loadManual() {
+            const b64 = document.getElementById('manualBase64').value.trim();
+            if (!b64) return showError("Paste Base64 content first.");
+            processBase64(b64, document.getElementById('gistId').value.trim());
+        }
+
+        async function processBase64(base64Data, gistId) {
+            try {
+                const binaryString = atob(base64Data.replace(/\s/g, ''));
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+
+                if (!SQL) {
+                    SQL = await initSqlJs({
+                        locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
+                    });
+                }
+                
+                db = new SQL.Database(bytes);
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({ gistId }));
+
+                document.getElementById('setupOverlay').style.opacity = '0';
+                setTimeout(() => {
+                    document.getElementById('setupOverlay').classList.add('hidden');
+                    document.getElementById('mainApp').classList.remove('hidden');
+                    document.getElementById('lastUpdated').innerText = `Synced: ${new Date().toLocaleTimeString()}`;
+                    loadTableList();
+                }, 400);
+            } catch (e) {
+                showError("Invalid Database Format.");
+            }
+        }
+
+        function showError(msg) {
+            const errorDiv = document.getElementById('loginError');
+            errorDiv.innerHTML = `<strong>Error:</strong> ${msg}`;
+            errorDiv.classList.remove('hidden');
+        }
+
+        function loadTableList() {
+            try {
+                const res = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+                const nav = document.getElementById('tableNav');
+                nav.innerHTML = '';
+                if (res.length > 0 && res[0].values) {
+                    res[0].values.forEach(v => {
+                        const name = v[0];
+                        const btn = document.createElement('button');
+                        btn.className = "w-full text-left px-4 py-3 rounded-xl text-sm font-semibold text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-all flex items-center gap-3 group";
+                        btn.innerHTML = `<div class="w-1.5 h-1.5 rounded-full bg-slate-300 group-hover:bg-blue-500 transition-colors"></div><span class="truncate">${name}</span>`;
+                        btn.onclick = () => showTable(name, btn);
+                        nav.appendChild(btn);
+                    });
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function showTable(tableName, btnElement) {
+            activeTable = tableName;
+            document.querySelectorAll('#tableNav button').forEach(b => b.classList.remove('bg-blue-50', 'text-blue-600'));
+            btnElement.classList.add('bg-blue-50', 'text-blue-600');
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('tableContainer').classList.remove('hidden');
+            document.getElementById('activeTableName').innerText = tableName;
+            fetchData();
+        }
+
+        function fetchData() {
+            if (!activeTable) return;
+            try {
+                const res = db.exec(`SELECT * FROM ${activeTable}`);
+                currentData = res.length > 0 ? res[0] : { columns: [], values: [] };
+                renderTable(currentData.values);
+            } catch (err) { console.error(err); }
+        }
+
+        function playVideo(url, title) {
+            const modal = document.getElementById('videoModal');
+            const frame = document.getElementById('videoFrame');
+            const videoTag = document.getElementById('htmlVideoPlayer');
+            document.getElementById('videoTitle').innerText = title || "Movie Player";
+            modal.classList.remove('hidden');
+            
+            // Clean URL and determine source
+            let cleanUrl = url.trim();
+            
+            if (cleanUrl.includes('drive.google.com')) {
+                // Strip shared query params and force the preview player
+                let driveId = "";
+                if (cleanUrl.includes('/d/')) {
+                    driveId = cleanUrl.split('/d/')[1].split('/')[0];
+                } else if (cleanUrl.includes('id=')) {
+                    driveId = cleanUrl.split('id=')[1].split('&')[0];
+                }
+                
+                if (driveId) {
+                    frame.src = `https://drive.google.com/file/d/${driveId}/preview`;
+                } else {
+                    frame.src = cleanUrl.replace('/view', '/preview');
+                }
+                
+                frame.classList.remove('hidden');
+                videoTag.classList.add('hidden');
+            } else if (cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be')) {
+                let ytId = "";
+                if (cleanUrl.includes('v=')) {
+                    ytId = cleanUrl.split('v=')[1].split('&')[0];
+                } else {
+                    ytId = cleanUrl.split('/').pop();
+                }
+                frame.src = `https://www.youtube.com/embed/${ytId}?autoplay=1&rel=0`;
+                frame.classList.remove('hidden');
+                videoTag.classList.add('hidden');
+            } else if (cleanUrl.toLowerCase().match(/\.(mp4|webm|ogg)$/)) {
+                videoTag.src = cleanUrl;
+                videoTag.classList.remove('hidden');
+                frame.classList.add('hidden');
+                videoTag.play().catch(e => console.log("Autoplay blocked"));
+            } else {
+                frame.src = cleanUrl;
+                frame.classList.remove('hidden');
+                videoTag.classList.add('hidden');
+            }
+        }
+
+        function closeVideo() {
+            const modal = document.getElementById('videoModal');
+            document.getElementById('videoFrame').src = "";
+            const v = document.getElementById('htmlVideoPlayer');
+            v.pause();
+            v.src = "";
+            modal.classList.add('hidden');
+        }
+
+        function formatCellValue(val, rowData) {
+            if (val === null || val === undefined) return '<span class="text-slate-300 italic">null</span>';
+            const strVal = String(val);
+            if (strVal.startsWith('http')) {
+                const isVideo = ['mp4', 'webm', 'youtube', 'youtu.be', 'drive.google'].some(ext => strVal.toLowerCase().includes(ext));
+                const rowTitle = rowData ? String(rowData[0]) : "Item";
+                return `<div onclick="playVideo('${strVal}', '${rowTitle.replace(/'/g, "\\'")}')" class="url-chip"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" /></svg>${isVideo ? 'Play' : 'Open'}</div>`;
+            }
+            return strVal;
+        }
+
+        function renderTable(values) {
+            const table = document.getElementById('dataTable');
+            document.getElementById('recordCount').innerText = `${values.length} Records`;
+            if (values.length === 0) {
+                table.innerHTML = `<tr><td class="p-12 text-center text-slate-400 italic">No records found</td></tr>`;
+                return;
+            }
+            let html = `<thead class="bg-slate-50 border-b border-slate-100 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider sticky top-0"><tr>${currentData.columns.map(c => `<th class="px-6 py-4">${c}</th>`).join('')}</tr></thead><tbody class="divide-y divide-slate-100">`;
+            values.forEach(row => {
+                html += `<tr class="hover:bg-blue-50/20">`;
+                row.forEach(cell => html += `<td class="px-6 py-4 text-slate-600">${formatCellValue(cell, row)}</td>`);
+                html += `</tr>`;
+            });
+            table.innerHTML = html + `</tbody>`;
+        }
+
+        function filterData() {
+            const term = document.getElementById('tableSearch').value.toLowerCase();
+            const filtered = currentData.values.filter(row => row.some(cell => String(cell).toLowerCase().includes(term)));
+            renderTable(filtered);
+        }
+
+        async function refreshData() {
+            document.getElementById('syncStatus').innerText = "Updating...";
+            await initializeApp();
+        }
+
+        function logout() { localStorage.removeItem(STORAGE_KEY); location.reload(); }
+    </script>
+</body>
+</html>
