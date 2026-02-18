@@ -178,7 +178,8 @@
         async function initializeApp() {
             const gistIdInput = document.getElementById('gistId');
             const gistId = gistIdInput.value.trim();
-            const fileName = "main.sqlite.b64";
+            // Default filename, but we will now be flexible
+            const defaultFileName = "main.sqlite.b64";
             const connectBtn = document.getElementById('connectBtn');
             const errorDiv = document.getElementById('loginError');
             
@@ -200,9 +201,24 @@
                 }
                 
                 const gistData = await res.json();
-                if (!gistData.files[fileName]) throw new Error(`File '${fileName}' not found.`);
+                let targetFile = null;
+
+                // LOGIC UPDATE: Look for the default file first, 
+                // otherwise find the first file ending in .b64
+                if (gistData.files[defaultFileName]) {
+                    targetFile = gistData.files[defaultFileName];
+                } else {
+                    const allFiles = Object.values(gistData.files);
+                    targetFile = allFiles.find(f => f.filename.toLowerCase().endsWith('.b64'));
+                }
+
+                if (!targetFile) {
+                    throw new Error("No .b64 database file found in this Gist.");
+                }
                 
-                processBase64(gistData.files[fileName].content, gistId);
+                // Process the content of the found file
+                processBase64(targetFile.content, gistId);
+
             } catch (err) {
                 showError(err.message);
                 document.getElementById('manualOption').classList.remove('hidden');
@@ -210,7 +226,6 @@
                 connectBtn.disabled = false;
             }
         }
-
         async function loadManual() {
             const b64 = document.getElementById('manualBase64').value.trim();
             if (!b64) return showError("Paste Base64 content first.");
